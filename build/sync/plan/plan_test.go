@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/mattermost/mattermost-plugin-starter-template/build/sync/plan"
+	"github.com/larkox/mattermost-plugin-game/build/sync/plan"
 )
 
 func TestUnmarshalPlan(t *testing.T) {

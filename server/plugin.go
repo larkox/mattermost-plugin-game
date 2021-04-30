@@ -1,10 +1,13 @@
 package main
 
 import (
-	"fmt"
+	"math/rand"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/gorilla/mux"
+	pluginapi "github.com/mattermost/mattermost-plugin-api"
 	"github.com/mattermost/mattermost-server/v5/plugin"
 )
 
@@ -18,11 +21,42 @@ type Plugin struct {
 	// configuration is the active plugin configuration. Consult getConfiguration and
 	// setConfiguration for usage.
 	configuration *configuration
+
+	router *mux.Router
+	mm     *pluginapi.Client
 }
 
 // ServeHTTP demonstrates a plugin that handles HTTP requests by greeting the world.
 func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Hello, world!")
+	r.Header.Add("Mattermost-Plugin-ID", c.SourcePluginId)
+	w.Header().Set("Content-Type", "application/json")
+
+	p.router.ServeHTTP(w, r)
 }
 
 // See https://developers.mattermost.com/extend/plugins/server/reference/
+func (p *Plugin) NewGame(user1, user2, gID string) (*Game, error) {
+	values := append(GetCardPool(), GetCardPool()...)
+	users := []string{user1, user2}
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(values), func(i, j int) { values[i], values[j] = values[j], values[i] })
+	rand.Shuffle(len(users), func(i, j int) { users[i], users[j] = users[j], users[i] })
+
+	return &Game{
+		GID:           gID,
+		CardValues:    values,
+		CardFlipped:   []bool{false, false, false, false, false, false, false, false, false, false, false, false},
+		LastFlipped:   -1,
+		CurrentPlayer: users[0],
+		OtherPlayer:   users[1],
+		Scores:        map[string]int{user1: 0, user2: 0},
+	}, nil
+}
+
+func (p *Plugin) OnActivate() error {
+	p.mm = pluginapi.NewClient(p.API)
+	p.mm.KV.DeleteAll()
+	p.initializeAPI()
+
+	return nil
+}
