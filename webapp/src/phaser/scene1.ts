@@ -1,8 +1,9 @@
+/* eslint-disable no-unused-expressions */
 import Phaser from 'phaser';
 
 import Client from 'client';
 
-import {boardMargin, canvasHeight, canvasWidth, cardHeight, cardScale, cardWidth, flipZoom, margin} from '../contants';
+import {canvasHeight, canvasWidth, cardHeight, cardScale, cardWidth, flipZoom, margin, ox, oy} from '../contants';
 
 import EventDispatcher from './event_emitter';
 
@@ -17,6 +18,7 @@ export class Scene1 extends Phaser.Scene {
     private opponentScore = 0;
     private scoreText?: Phaser.GameObjects.Text;
     private turnText?: Phaser.GameObjects.Text;
+    private ping?: Phaser.GameObjects.Container;
     private flipping = false;
     private finished = false;
 
@@ -35,23 +37,18 @@ export class Scene1 extends Phaser.Scene {
     }
 
     create() {
-        const ox = boardMargin + (cardWidth / 2);
-        const oy = boardMargin + (cardHeight / 2);
         let index = 0;
         for (let i = 0; i < 3; i++) {
             for (let j = 0; j < 4; j++) {
-                const x = ox + ((cardWidth + margin) * i);
-                const y = oy + ((cardHeight + margin) * j);
-                const card = this.add.sprite(x, y, 'cards', 0).setInteractive().setScale(cardScale);
-                card.setData('index', index);
-                this.cardsGroup.push(card);
+                this.cardsGroup.push(this.createCard(i, j, index));
                 index++;
             }
         }
 
         this.add.text(canvasWidth / 2, 50, 'MEMORY', {fontSize: '30px', align: 'center'}).setOrigin(0.5);
-        this.turnText = this.add.text(canvasWidth / 2, canvasHeight - 30, '', {fontSize: '15px', align: 'center'}).setOrigin(0.5);
+        this.turnText = this.add.text(canvasWidth / 2, canvasHeight - 30, '', {fontSize: '15px', align: 'center', wordWrap: {width: canvasWidth - margin}}).setOrigin(0.5);
         this.scoreText = this.add.text(canvasWidth / 2, canvasHeight - 60, `Your score: ${this.myScore}\n@${this.opponentUsername}'s score: ${this.opponentScore}`, {fontSize: '15px', align: 'center'}).setOrigin(0.5);
+        this.ping = this.pingButton();
 
         const client = new Client();
         client.getGame(this.gID).then(({cards, turn, lastFlipped, opponentName, myScore, opponentScore}) => {
@@ -63,37 +60,6 @@ export class Scene1 extends Phaser.Scene {
             this.opponentUsername = opponentName;
             this.resync(cards, turn, lastFlipped, myScore, opponentScore);
             this.loading = false;
-        });
-
-        this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
-            if (this.loading) {
-                return;
-            }
-
-            if (this.flipping) {
-                return;
-            }
-
-            if (!this.myTurn) {
-                return;
-            }
-
-            if (this.finished) {
-                return;
-            }
-
-            const flipped: boolean = gameObject.getData('flipped');
-            if (flipped) {
-                return;
-            }
-
-            const cardIndex = gameObject.getData('index');
-            const client = new Client();
-            this.loading = true;
-            client.flip(this.gID, cardIndex).then((value) => {
-                this.flip(gameObject, value, this.onUserFlipComplete);
-                this.loading = false;
-            });
         });
 
         const ee = EventDispatcher.getInstance();
@@ -119,6 +85,118 @@ export class Scene1 extends Phaser.Scene {
         this.events.on('destroy', () => {
             ee.removeAllListeners();
         });
+    }
+
+    private createCard = (i: number, j: number, index: number) => {
+        const x = ox + ((cardWidth + margin) * i);
+        const y = oy + ((cardHeight + margin) * j);
+        const card = this.add.sprite(x, y, 'cards', 0).setInteractive().setScale(cardScale);
+        card.setData('index', index);
+        card.on('pointerup', () => {
+            if (this.loading) {
+                return;
+            }
+
+            if (this.flipping) {
+                return;
+            }
+
+            if (!this.myTurn) {
+                return;
+            }
+
+            if (this.finished) {
+                return;
+            }
+
+            const flipped: boolean = card.getData('flipped');
+            if (flipped) {
+                return;
+            }
+
+            const cardIndex = card.getData('index');
+            const client = new Client();
+            this.loading = true;
+            client.flip(this.gID, cardIndex).then((value) => {
+                this.flip(card, value, this.onUserFlipComplete);
+                this.loading = false;
+            });
+        });
+
+        return card;
+    }
+
+    private pingButton = () => {
+        const frame = this.add.rectangle(0, 0, canvasWidth / 4, 20, 0x000000, 0xffffff).setStrokeStyle(4, 0xffffff);
+        frame.isStroked = true;
+        const text = this.add.text(0, 0, 'PING', {fontSize: '15px', align: 'center'}).setOrigin(0.5);
+
+        const container = this.add.container(((canvasWidth * 7) / 8) - 20, 20, [frame, text]).
+            setInteractive(new Phaser.Geom.Rectangle(-canvasWidth / 8, -10, canvasWidth / 4, 20), Phaser.Geom.Rectangle.Contains).
+            on('pointerover', () => {
+                text.setTint(0x44ff44);
+                frame.setStrokeStyle(4, 0x44ff44);
+            }).on('pointerout', () => {
+                text.clearTint();
+                frame.setStrokeStyle(4, 0xffffff);
+            }).on('pointerup', () => {
+                const client = new Client();
+                client.ping(this.gID);
+            });
+
+        const enablePingButton = () => {
+            container.setVisible(true);
+            this.add.tween({
+                targets: text,
+                duration: 200,
+                props: {
+                    fillAlpha: 1,
+                },
+                onComplete: () => {
+                    container.setActive(true);
+                },
+            });
+            this.add.tween({
+                targets: frame,
+                duration: 200,
+                props: {
+                    strokeAlpha: 1,
+                },
+            });
+        };
+        const disablePingButton = () => {
+            container.setActive(false);
+            this.add.tween({
+                targets: text,
+                duration: 200,
+                props: {
+                    fillAlpha: 0,
+                },
+                onComplete: () => {
+                    container.setVisible(false);
+                },
+            });
+            this.add.tween({
+                targets: frame,
+                duration: 200,
+                props: {
+                    strokeAlpha: 0,
+                },
+            });
+        };
+
+        container.setData('enable', enablePingButton);
+        container.setData('disable', disablePingButton);
+        this.disablePingButton();
+        return container;
+    }
+
+    private enablePingButton = () => {
+        this.ping?.getData('enable')();
+    }
+
+    private disablePingButton = () => {
+        this.ping?.getData('disable')();
     }
 
     private onUserFlipComplete = (gameObject: Phaser.GameObjects.GameObject) => {
@@ -148,6 +226,7 @@ export class Scene1 extends Phaser.Scene {
             if (finished) {
                 this.finished = true;
                 this.turnText?.setText('The game has ended');
+                this.disablePingButton();
             }
             return;
         }
@@ -159,6 +238,7 @@ export class Scene1 extends Phaser.Scene {
         this.firstFlippedIndex = -1;
         this.myTurn = false;
         this.turnText?.setText(`It is @${this.opponentUsername}'s turn`);
+        this.enablePingButton();
     }
 
     private onRemoteFlipComplete = (gameObject: Phaser.GameObjects.GameObject) => {
@@ -187,6 +267,7 @@ export class Scene1 extends Phaser.Scene {
             }
 
             if (finished) {
+                this.disablePingButton();
                 this.finished = true;
                 this.turnText?.setText('The game has ended');
             }
@@ -200,6 +281,7 @@ export class Scene1 extends Phaser.Scene {
         this.firstFlippedIndex = -1;
         this.myTurn = true;
         this.turnText?.setText('It is your turn');
+        this.disablePingButton();
     }
 
     resync(cards: string[], turn: boolean, firstFlippedIndex: number, myScore: number, opponentScore: number) {
@@ -217,8 +299,10 @@ export class Scene1 extends Phaser.Scene {
         this.myTurn = turn;
         if (turn) {
             this.turnText?.setText('It is your turn');
+            this.disablePingButton();
         } else {
             this.turnText?.setText(`It is @${this.opponentUsername}'s turn`);
+            this.enablePingButton();
         }
 
         for (let i = 0; i < cards.length; i++) {
@@ -261,38 +345,5 @@ export class Scene1 extends Phaser.Scene {
                 });
             },
         });
-    }
-
-    update() {
-        // const player = this.player
-        // if (player) {
-        //     const cursors = this.input.keyboard.createCursorKeys();
-        //     if (cursors.left.isDown)
-        //     {
-        //         console.log('LEFT')
-        //         player.setVelocityX(-160);
-
-        //         player.anims.play('left', true);
-        //     }
-        //     else if (cursors.right.isDown)
-        //     {
-        //         console.log('RIGHT')
-        //         player.setVelocityX(160);
-
-        //         player.anims.play('right', true);
-        //     }
-        //     else
-        //     {
-        //         player.setVelocityX(0);
-
-        //         player.anims.play('turn');
-        //     }
-
-        //     if (cursors.up.isDown && player.body.touching.down)
-        //     {
-        //         console.log('UP!')
-        //         player.setVelocityY(-330);
-        //     }
-        // }
     }
 }

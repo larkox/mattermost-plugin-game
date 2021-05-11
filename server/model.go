@@ -26,11 +26,6 @@ type GetGameResponse struct {
 	OpponentScore int      `json:"opponentScore"`
 }
 
-type WebsocketFlip struct {
-	Value string `json:"value"`
-	Index int    `json:"index"`
-}
-
 type Game struct {
 	GID           string
 	CardValues    []string
@@ -39,6 +34,11 @@ type Game struct {
 	CurrentPlayer string
 	OtherPlayer   string
 	Scores        map[string]int
+	Streak        int
+}
+
+type PlayerStats struct {
+	Wins int
 }
 
 func GetCardPool() []string {

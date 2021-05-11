@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/larkox/mattermost-plugin-badges/badgesmodel"
 	pluginapi "github.com/mattermost/mattermost-plugin-api"
+	"github.com/mattermost/mattermost-server/v5/model"
 	"github.com/mattermost/mattermost-server/v5/plugin"
+	"github.com/pkg/errors"
 )
 
 // Plugin implements the interface expected by the Mattermost server to communicate between the server and plugin processes.
@@ -22,8 +25,10 @@ type Plugin struct {
 	// setConfiguration for usage.
 	configuration *configuration
 
-	router *mux.Router
-	mm     *pluginapi.Client
+	router    *mux.Router
+	mm        *pluginapi.Client
+	badgesMap map[string]badgesmodel.BadgeID
+	BotUserID string
 }
 
 // ServeHTTP demonstrates a plugin that handles HTTP requests by greeting the world.
@@ -54,9 +59,19 @@ func (p *Plugin) NewGame(user1, user2, gID string) (*Game, error) {
 }
 
 func (p *Plugin) OnActivate() error {
+	botID, err := p.Helpers.EnsureBot(&model.Bot{
+		Username:    "memory",
+		DisplayName: "Memory Bot",
+		Description: "Created by the Memory game plugin.",
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to ensure memory bot")
+	}
+	p.BotUserID = botID
+
 	p.mm = pluginapi.NewClient(p.API)
-	p.mm.KV.DeleteAll()
 	p.initializeAPI()
+	p.EnsureBadges()
 
 	return nil
 }

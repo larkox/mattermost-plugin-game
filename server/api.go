@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"runtime/debug"
 
@@ -37,6 +38,7 @@ func (p *Plugin) initializeAPI() {
 	apiRouter := p.router.PathPrefix("/api/v1").Subrouter()
 
 	apiRouter.HandleFunc("/game/{gameID}/flip", p.extractUserMiddleWare(p.handleFlipCard, ResponseTypeJSON)).Methods(http.MethodPost)
+	apiRouter.HandleFunc("/game/{gameID}/ping", p.extractUserMiddleWare(p.handlePing, ResponseTypeJSON)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/game/{gameID}", p.extractUserMiddleWare(p.handleGetGame, ResponseTypeJSON)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/start", p.extractUserMiddleWare(p.handleStartGame, ResponseTypeJSON)).Methods(http.MethodPost)
 
@@ -56,9 +58,40 @@ func dialogError(w http.ResponseWriter, text string, errors map[string]string) {
 	_, _ = w.Write(resp.ToJson())
 }
 
-func dialogOK(w http.ResponseWriter) {
-	resp := &model.SubmitDialogResponse{}
-	_, _ = w.Write(resp.ToJson())
+func (p *Plugin) handlePing(w http.ResponseWriter, r *http.Request, actingUserID string) {
+	gameID, ok := mux.Vars(r)["gameID"]
+	if !ok {
+		p.mm.Log.Debug("No gameID")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	game, err := p.getGame(gameID)
+	if err != nil {
+		p.mm.Log.Debug("cannot get game", "err", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if game.OtherPlayer != actingUserID {
+		p.mm.Log.Debug("Wrong player")
+		p.sendResyncWebsocket(actingUserID, game)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	u, err := p.mm.User.Get(actingUserID)
+	if err != nil {
+		p.mm.Log.Debug("Cannot get user")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	_ = p.mm.Post.DM(p.BotUserID, game.CurrentPlayer, &model.Post{
+		Message: fmt.Sprintf("@%s is waiting for you to move.", u.Username),
+	})
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (p *Plugin) handleFlipCard(w http.ResponseWriter, r *http.Request, actingUserID string) {
@@ -79,6 +112,12 @@ func (p *Plugin) handleFlipCard(w http.ResponseWriter, r *http.Request, actingUs
 	}
 
 	game, err := p.getGame(gameID)
+	if err != nil {
+		p.mm.Log.Debug("cannot get game", "err", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	if game.CardFlipped[req.Index] {
 		p.mm.Log.Debug("Already flipped")
 		p.sendResyncWebsocket(actingUserID, game)
@@ -103,13 +142,19 @@ func (p *Plugin) handleFlipCard(w http.ResponseWriter, r *http.Request, actingUs
 	} else {
 		lastFlippedValue := game.CardValues[game.LastFlipped]
 		if lastFlippedValue == value {
-			game.Scores[actingUserID] += 1
+			game.Scores[actingUserID]++
+			game.Streak++
 		} else {
 			game.CardFlipped[game.LastFlipped] = false
 			game.CardFlipped[req.Index] = false
 			game.CurrentPlayer, game.OtherPlayer = game.OtherPlayer, game.CurrentPlayer
+			game.Streak = 0
 		}
 		game.LastFlipped = -1
+	}
+
+	if game.Streak >= 4 {
+		p.GrantBadge(AchievementNameStreak, game.CurrentPlayer)
 	}
 
 	finished := true
@@ -121,7 +166,28 @@ func (p *Plugin) handleFlipCard(w http.ResponseWriter, r *http.Request, actingUs
 	}
 
 	if finished {
-		p.removeGame(game)
+		winner := game.CurrentPlayer
+		if game.Scores[game.CurrentPlayer] < game.Scores[game.OtherPlayer] {
+			winner = game.OtherPlayer
+		}
+		var stats *PlayerStats
+		stats, err = p.getPlayerStats(winner)
+		if err == nil {
+			stats.Wins++
+			if stats.Wins >= 1 {
+				p.GrantBadge(AchievementNameWinOne, winner)
+			}
+			if stats.Wins >= 5 {
+				p.GrantBadge(AchievementNameWinFive, winner)
+			}
+			if stats.Wins >= 10 {
+				p.GrantBadge(AchievementNameWinTen, winner)
+			}
+			_ = p.setPlayerStats(winner, stats)
+		}
+		p.GrantBadge(AchievementNamePlayOnce, game.CurrentPlayer)
+		p.GrantBadge(AchievementNamePlayOnce, game.OtherPlayer)
+		_ = p.removeGame(game)
 	} else {
 		err = p.setGame(game)
 	}
@@ -144,7 +210,7 @@ func (p *Plugin) handleFlipCard(w http.ResponseWriter, r *http.Request, actingUs
 		return
 	}
 
-	w.Write(b)
+	_, _ = w.Write(b)
 
 	p.mm.Frontend.PublishWebSocketEvent("flip", map[string]interface{}{"index": req.Index, "value": value, "gID": gameID}, &model.WebsocketBroadcast{UserId: otherPlayerID})
 }
@@ -164,7 +230,7 @@ func (p *Plugin) sendResyncWebsocket(player string, game *Game) {
 		opponentID = game.OtherPlayer
 	}
 
-	p.mm.Frontend.PublishWebSocketEvent("flip", map[string]interface{}{
+	p.mm.Frontend.PublishWebSocketEvent("resync", map[string]interface{}{
 		"cards":         values,
 		"turn":          game.CurrentPlayer == player,
 		"lastFlipped":   game.LastFlipped,
@@ -223,7 +289,14 @@ func (p *Plugin) handleStartGame(w http.ResponseWriter, r *http.Request, actingU
 		return
 	}
 
-	w.Write(b)
+	u, err := p.mm.User.Get(actingUserID)
+	if err == nil {
+		_ = p.mm.Post.DM(p.BotUserID, otherUser, &model.Post{
+			Message: fmt.Sprintf("@%s started a memory game with you.", u.Username),
+		})
+	}
+
+	_, _ = w.Write(b)
 }
 
 func (p *Plugin) handleGetGame(w http.ResponseWriter, r *http.Request, actingUserID string) {
@@ -276,7 +349,7 @@ func (p *Plugin) handleGetGame(w http.ResponseWriter, r *http.Request, actingUse
 		return
 	}
 
-	w.Write(b)
+	_, _ = w.Write(b)
 }
 
 func (p *Plugin) extractUserMiddleWare(handler HTTPHandlerFuncWithUser, responseType ResponseType) http.HandlerFunc {
@@ -315,19 +388,6 @@ func (p *Plugin) withRecovery(next http.Handler) http.Handler {
 	})
 }
 
-func checkPluginRequest(next HTTPHandlerFuncWithUser) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// All other plugins are allowed
-		pluginID := r.Header.Get("Mattermost-Plugin-ID")
-		if pluginID == "" {
-			http.Error(w, "Not authorized", http.StatusUnauthorized)
-			return
-		}
-
-		next(w, r, pluginID)
-	}
-}
-
 func (p *Plugin) writeAPIError(w http.ResponseWriter, apiErr *APIErrorResponse) {
 	b, err := json.Marshal(apiErr)
 	if err != nil {
@@ -344,16 +404,4 @@ func (p *Plugin) writeAPIError(w http.ResponseWriter, apiErr *APIErrorResponse) 
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-}
-
-func (p *Plugin) getPluginURL() string {
-	urlP := p.mm.Configuration.GetConfig().ServiceSettings.SiteURL
-	url := "/"
-	if urlP != nil {
-		url = *urlP
-	}
-	if url[len(url)-1] == '/' {
-		url = url[0 : len(url)-1]
-	}
-	return url + "/plugins/" + manifest.Id
 }

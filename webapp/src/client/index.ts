@@ -40,6 +40,14 @@ export default class Client {
         }
     }
 
+    async ping(gID: string): Promise<void> {
+        try {
+            const res = await this.doGet(`${this.url}/game/${gID}/ping`);
+        } catch {
+            // Do nothing
+        }
+    }
+
     private doGet = async (url: string, headers: {[x:string]: string} = {}) => {
         headers['X-Timezone-Offset'] = String(new Date().getTimezoneOffset());
 
