@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"runtime/debug"
 
@@ -31,7 +32,7 @@ type APIErrorResponse struct {
 	StatusCode int    `json:"status_code"`
 }
 
-func (p *Plugin) initializeAPI() {
+func (p *Plugin) initializeAPI(staticAssets fs.FS) {
 	p.router = mux.NewRouter()
 	p.router.Use(p.withRecovery)
 
@@ -41,6 +42,9 @@ func (p *Plugin) initializeAPI() {
 	apiRouter.HandleFunc("/game/{gameID}/ping", p.extractUserMiddleWare(p.handlePing, ResponseTypeJSON)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/game/{gameID}", p.extractUserMiddleWare(p.handleGetGame, ResponseTypeJSON)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/start", p.extractUserMiddleWare(p.handleStartGame, ResponseTypeJSON)).Methods(http.MethodPost)
+
+	// Static files
+	p.router.PathPrefix("/static").Handler(http.StripPrefix("/", http.FileServer(http.FS(staticAssets))))
 
 	p.router.PathPrefix("/").HandlerFunc(p.defaultHandler)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -13,6 +14,9 @@ import (
 	"github.com/mattermost/mattermost-server/v5/plugin"
 	"github.com/pkg/errors"
 )
+
+//go:embed static
+var staticAssets embed.FS //nolint: gochecknoglobals
 
 // Plugin implements the interface expected by the Mattermost server to communicate between the server and plugin processes.
 type Plugin struct {
@@ -70,7 +74,7 @@ func (p *Plugin) OnActivate() error {
 	p.BotUserID = botID
 
 	p.mm = pluginapi.NewClient(p.API)
-	p.initializeAPI()
+	p.initializeAPI(staticAssets)
 	p.EnsureBadges()
 
 	return nil

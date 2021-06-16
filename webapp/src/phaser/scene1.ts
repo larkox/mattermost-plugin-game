@@ -5,6 +5,8 @@ import Client from 'client';
 
 import {canvasHeight, canvasWidth, cardHeight, cardScale, cardWidth, flipZoom, margin, ox, oy} from '../contants';
 
+import {getAssetsURL} from 'utils';
+
 import EventDispatcher from './event_emitter';
 
 export class Scene1 extends Phaser.Scene {
@@ -32,8 +34,8 @@ export class Scene1 extends Phaser.Scene {
     private opponentUsername = '';
 
     preload() {
-        this.load.setBaseURL('http://labs.phaser.io');
-        this.load.atlas('cards', 'assets/atlas/cards.png', 'assets/atlas/cards.json');
+        this.load.setBaseURL(getAssetsURL());
+        this.load.atlas('cards', '/cards.png', '/cards.json');
     }
 
     create() {
