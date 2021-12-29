@@ -2,6 +2,7 @@ import React from 'react';
 import {Store} from 'redux';
 
 import {GlobalState} from 'mattermost-redux/types/store';
+import {getConfig} from 'mattermost-redux/selectors/entities/general';
 
 // eslint-disable-next-line import/no-unresolved
 import {GenericAction} from 'mattermost-redux/types/actions';
@@ -59,6 +60,16 @@ export default class Plugin {
             'Memory Game',
             'Start a memory game here.',
         );
+
+        if (registry.registerAppBarComponent) {
+            const siteUrl = getConfig(store.getState())?.SiteURL || '';
+            const iconURL = `${siteUrl}/plugins/${manifest.id}/public/app-bar-icon.png`;
+            registry.registerAppBarComponent(
+                iconURL,
+                openRHS,
+                'Start a memory game here.',
+            );
+        }
     }
 }
 
